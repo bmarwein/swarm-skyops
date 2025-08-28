@@ -1,0 +1,47 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+
+secrets:
+  pi-swarm-grafana-admin-password:
+    external: true
+
+services:
+  pi-swarm-grafana:
+    image: grafana/grafana:11.2.0
+    env_file: [ ../env/grafana.env ]
+    environment:
+      TZ: ${TZ}
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/pi-swarm-grafana-admin-password
+      # Recommandé en prod :
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    secrets:
+      - pi-swarm-grafana-admin-password
+    volumes:
+      - ../volumes/grafana/data:/var/lib/grafana
+      - ../files/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - pi-swarm-traefik-net
+    deploy:
+      # place Grafana sur un manager (ex: pi5-master-01) ou celui que tu veux
+      placement:
+        constraints:
+          - node.hostname == pi5-master-01
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-grafana.rule=Host(`${GRAFANA_HOST}`)
+        - traefik.http.routers.pi-swarm-grafana.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-grafana.tls=true
+        - traefik.http.routers.pi-swarm-grafana.tls.certresolver=le
+        - traefik.http.services.pi-swarm-grafana.loadbalancer.server.port=3000
+        # Petits headers de sécurité
+        - traefik.http.middlewares.pi-swarm-grafana-sec.headers.stsSeconds=31536000
+        - traefik.http.middlewares.pi-swarm-grafana-sec.headers.stsIncludeSubdomains=true
+        - traefik.http.middlewares.pi-swarm-grafana-sec.headers.stsPreload=true
+        - traefik.http.middlewares.pi-swarm-grafana-sec.headers.contentTypeNosniff=true
+        - traefik.http.middlewares.pi-swarm-grafana-sec.headers.browserXssFilter=true
+        - traefik.http.routers.pi-swarm-grafana.middlewares=pi-swarm-grafana-sec

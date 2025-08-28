@@ -1,0 +1,28 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+
+services:
+  pi-swarm-cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    env_file: [ ../env/cadvisor.env ]
+    hostname: cadvisor
+    deploy:
+      mode: global   # un conteneur sur chaque nœud Swarm
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-cadvisor.rule=Host(`${CADVISOR_HOST}`)
+        - traefik.http.routers.pi-swarm-cadvisor.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-cadvisor.tls=true
+        - traefik.http.routers.pi-swarm-cadvisor.tls.certresolver=le
+        - traefik.http.services.pi-swarm-cadvisor.loadbalancer.server.port=8080
+    networks:
+      - pi-swarm-traefik-net
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    privileged: true

@@ -1,0 +1,32 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+
+services:
+  pi-swarm-prometheus:
+    image: prom/prometheus:v2.55.1
+    env_file: [ ../env/prometheus.env ]
+    hostname: prometheus
+    volumes:
+      - ../files/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../volumes/prometheus/data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    networks:
+      - pi-swarm-traefik-net
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == pi5-master-01
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-prometheus.rule=Host(`${PROMETHEUS_HOST}`)
+        - traefik.http.routers.pi-swarm-prometheus.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-prometheus.tls=true
+        - traefik.http.routers.pi-swarm-prometheus.tls.certresolver=le
+        - traefik.http.services.pi-swarm-prometheus.loadbalancer.server.port=9090

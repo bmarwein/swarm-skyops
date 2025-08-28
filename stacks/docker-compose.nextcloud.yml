@@ -1,0 +1,131 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+  pi-swarm-next-net: {}
+
+secrets:
+  pi-swarm-nextcloud-db-password:
+    external: true
+  pi-swarm-nextcloud-admin-password:
+    external: true
+
+services:
+  # Base de données Postgres
+  pi-swarm-next-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD_FILE: /run/secrets/pi-swarm-nextcloud-db-password
+      TZ: ${TZ}
+    secrets:
+      - pi-swarm-nextcloud-db-password
+    volumes:
+      - ../volumes/nextcloud/db:/var/lib/postgresql/data
+    networks: [ pi-swarm-next-net ]
+    deploy:
+      placement:
+        # ancre Nextcloud + DB sur le nœud stockage (à adapter si besoin)
+        constraints:
+          - node.labels.next.storage == true
+          - node.platform.os == linux
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nextcloud -d nextcloud || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Cache Redis (aucun port publié)
+  pi-swarm-next-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ../volumes/nextcloud/data:/data   # léger, juste AOF
+    networks: [ pi-swarm-next-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.labels.next.storage == true
+
+  # Application Nextcloud (Apache)
+  pi-swarm-next-app:
+    image: nextcloud:31-apache
+    env_file: [ ../env/nextcloud.env ]
+    environment:
+      # DB
+      POSTGRES_HOST: pi-swarm-next-db
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD_FILE: /run/secrets/pi-swarm-nextcloud-db-password
+      # Admin (init uniquement)
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_ADMIN_PASSWORD_FILE: /run/secrets/pi-swarm-nextcloud-admin-password
+      # Reverse proxy / headers
+      TRUSTED_PROXIES: ${NEXTCLOUD_TRUSTED_PROXIES}
+      NEXTCLOUD_TRUSTED_DOMAINS: ${NEXTCLOUD_TRUSTED_DOMAINS}
+      OVERWRITEHOST: ${NEXTCLOUD_HOST}
+      OVERWRITEPROTOCOL: https
+      OVERWRITECLIURL: https://${NEXTCLOUD_HOST}
+      PHP_MEMORY_LIMIT: 512M
+      PHP_UPLOAD_LIMIT: 1024M
+      TZ: ${TZ}
+      # Redis (verrouillage & mémoire)
+      REDIS_HOST: pi-swarm-next-redis
+      REDIS_HOST_PORT: "6379"
+    secrets:
+      - pi-swarm-nextcloud-db-password
+      - pi-swarm-nextcloud-admin-password
+    depends_on:
+      - pi-swarm-next-db
+      - pi-swarm-next-redis
+    volumes:
+      - ../volumes/nextcloud/data:/var/www/html/data
+      - ../volumes/nextcloud/config:/var/www/html/config
+      - ../volumes/nextcloud/custom_apps:/var/www/html/custom_apps
+      - ../volumes/nextcloud/themes:/var/www/html/themes
+    networks: [ pi-swarm-traefik-net, pi-swarm-next-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.labels.next.storage == true
+          - node.platform.os == linux
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-nextcloud.rule=Host(`${NEXTCLOUD_HOST}`)
+        - traefik.http.routers.pi-swarm-nextcloud.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-nextcloud.tls=true
+        - traefik.http.routers.pi-swarm-nextcloud.tls.certresolver=le
+        - traefik.http.services.pi-swarm-nextcloud.loadbalancer.server.port=80
+        # (optionnel) headers de sécurité
+        - traefik.http.middlewares.pi-swarm-nextcloud-sec.headers.stsSeconds=31536000
+        - traefik.http.middlewares.pi-swarm-nextcloud-sec.headers.stsIncludeSubdomains=true
+        - traefik.http.middlewares.pi-swarm-nextcloud-sec.headers.stsPreload=true
+        - traefik.http.middlewares.pi-swarm-nextcloud-sec.headers.contentTypeNosniff=true
+        - traefik.http.middlewares.pi-swarm-nextcloud-sec.headers.browserXssFilter=true
+        - traefik.http.routers.pi-swarm-nextcloud.middlewares=pi-swarm-nextcloud-sec
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/status.php | grep -q 'installed' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+
+  # Cron Nextcloud (tâches programmées)
+  pi-swarm-next-cron:
+    image: nextcloud:31-apache
+    entrypoint: ["/cron.sh"]
+    env_file: [ ../env/nextcloud.env ]
+    environment:
+      TZ: ${TZ}
+    depends_on: [ pi-swarm-next-app ]
+    volumes:
+      - ../volumes/nextcloud/data:/var/www/html/data
+      - ../volumes/nextcloud/config:/var/www/html/config
+      - ../volumes/nextcloud/custom_apps:/var/www/html/custom_apps
+      - ../volumes/nextcloud/themes:/var/www/html/themes
+    networks: [ pi-swarm-next-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.labels.next.storage == true

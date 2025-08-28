@@ -1,0 +1,35 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+
+secrets:
+  pi-swarm-portainer-admin-password:
+    external: true
+
+services:
+  pi-swarm-portainer:
+    image: portainer/portainer-ce:latest
+    env_file: [ ../env/portainer.env ]
+    command:
+      - --admin-password-file=/run/secrets/pi-swarm-portainer-admin-password
+      - --tlsskipverify
+      - --templates https://raw.githubusercontent.com/portainer/templates/master/templates.json
+    secrets:
+      - pi-swarm-portainer-admin-password
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../volumes/portainer/data:/data
+    networks: [ pi-swarm-traefik-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == pi5-master-01
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-portainer.rule=Host(`${PORTAINER_HOST}`)
+        - traefik.http.routers.pi-swarm-portainer.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-portainer.tls=true
+        - traefik.http.routers.pi-swarm-portainer.tls.certresolver=le
+        - traefik.http.services.pi-swarm-portainer.loadbalancer.server.port=9000

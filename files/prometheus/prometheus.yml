@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # cAdvisor sur chaque nœud (service global)
+  - job_name: 'cadvisor'
+    dns_sd_configs:
+      - names: ['tasks.pi-swarm-cadvisor']
+        type: 'A'
+        port: 8080
+
+  # node-exporter sur chaque nœud (service global)
+  - job_name: 'node-exporter'
+    dns_sd_configs:
+      - names: ['tasks.pi-swarm-node-exporter']
+        type: 'A'
+        port: 9100

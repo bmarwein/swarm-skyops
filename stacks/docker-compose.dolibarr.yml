@@ -1,0 +1,60 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+  pi-swarm-doli-net: {}
+
+secrets:
+  pi-swarm-doli-root-password: { external: true }
+  pi-swarm-doli-user-password: { external: true }
+
+services:
+  pi-swarm-doli-db:
+    image: mariadb:10.11
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/pi-swarm-doli-root-password
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD_FILE: /run/secrets/pi-swarm-doli-user-password
+      TZ: ${TZ}
+    secrets:
+      - pi-swarm-doli-root-password
+      - pi-swarm-doli-user-password
+    volumes:
+      - ../volumes/dolibarr/db:/var/lib/mysql
+    networks: [ pi-swarm-doli-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.labels.doli.storage == true
+          - node.platform.os == linux
+
+  pi-swarm-doli-app:
+    image: dolibarr/dolibarr:22
+    env_file: [ ../env/dolibarr.env ]
+    environment:
+      DOLI_DB_HOST: pi-swarm-doli-db
+      DOLI_DB_NAME: ${MYSQL_DATABASE}
+      DOLI_DB_USER: ${MYSQL_USER}
+      DOLI_DB_PASSWORD_FILE: /run/secrets/pi-swarm-doli-user-password
+      PHP_TZ: ${TZ}
+    secrets:
+      - pi-swarm-doli-user-password
+    depends_on: [ pi-swarm-doli-db ]
+    volumes:
+      - ../volumes/dolibarr/documents:/var/www/documents
+      - ../volumes/dolibarr/custom:/var/www/html/custom
+    networks: [ pi-swarm-traefik-net, pi-swarm-doli-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.labels.doli.storage == true
+          - node.platform.os == linux
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-crm.rule=Host(`${DOLI_HOST}`)
+        - traefik.http.routers.pi-swarm-crm.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-crm.tls=true
+        - traefik.http.routers.pi-swarm-crm.tls.certresolver=le
+        - traefik.http.services.pi-swarm-crm.loadbalancer.server.port=80

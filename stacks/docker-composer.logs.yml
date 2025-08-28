@@ -1,0 +1,45 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+
+services:
+  # Loki (central)
+  pi-swarm-loki:
+    image: grafana/loki:2.9.8
+    env_file: [ ../env/loki.env ]
+    command: [ "-config.file=/etc/loki/loki.yml" ]
+    volumes:
+      - ../files/loki/loki-config.yml:/etc/loki/loki.yml:ro
+      - ../volumes/loki:/loki
+    networks: [ pi-swarm-traefik-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == pi5-master-01
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-loki.rule=Host(`${LOKI_HOST}`)
+        - traefik.http.routers.pi-swarm-loki.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-loki.tls=true
+        - traefik.http.routers.pi-swarm-loki.tls.certresolver=le
+        - traefik.http.services.pi-swarm-loki.loadbalancer.server.port=3100
+
+  # Promtail (agent sur chaque nœud)
+  pi-swarm-promtail:
+    image: grafana/promtail:2.9.8
+    command: [ "-config.file=/etc/promtail/promtail.yml" ]
+    volumes:
+      - ../files/promtail/promtail-config.yml:/etc/promtail/promtail.yml:ro
+      - /var/log:/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../volumes/promtail:/var/lib/promtail
+    networks: [ pi-swarm-traefik-net ]
+    deploy:
+      mode: global
+      restart_policy: { condition: any }
+      update_config:
+        parallelism: 2
+        delay: 5s
+        order: start-first

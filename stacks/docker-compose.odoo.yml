@@ -1,0 +1,74 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+  pi-swarm-odoo-net: {}
+
+secrets:
+  pi-swarm-odoo-pg-password:
+    external: true
+
+services:
+  pi-swarm-odoo-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: odoo
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD_FILE: /run/secrets/pi-swarm-odoo-pg-password
+      TZ: ${TZ}
+    secrets: [ pi-swarm-odoo-pg-password ]
+    volumes:
+      - ../volumes/odoo/pg_data:/var/lib/postgresql/data
+    networks: [ pi-swarm-odoo-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.labels.odoo.storage == true
+          - node.platform.os == linux
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo -d odoo || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  pi-swarm-odoo:
+    image: odoo:17
+    env_file: [ ../env/odoo.env ]
+    environment:
+      HOST: pi-swarm-odoo-db
+      PORT: "5432"
+      USER: odoo
+      PASSWORD_FILE: /run/secrets/pi-swarm-odoo-pg-password
+      PROXY_MODE: "true"
+      LANG: fr_FR.UTF-8
+    secrets: [ pi-swarm-odoo-pg-password ]
+    depends_on: [ pi-swarm-odoo-db ]
+    volumes:
+      - ../volumes/odoo/odoo_data:/var/lib/odoo
+      - ../volumes/odoo/filestore:/var/lib/odoo/.local/share/Odoo
+    networks: [ pi-swarm-traefik-net, pi-swarm-odoo-net ]
+    deploy:
+      placement:
+        constraints:
+          - node.labels.odoo.storage == true
+          - node.platform.os == linux
+      labels:
+        - traefik.enable=true
+        # UI
+        - traefik.http.routers.pi-swarm-odoo.rule=Host(`${ODOO_HOST}`)
+        - traefik.http.routers.pi-swarm-odoo.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-odoo.tls=true
+        - traefik.http.routers.pi-swarm-odoo.tls.certresolver=le
+        - traefik.http.services.pi-swarm-odoo.loadbalancer.server.port=8069
+        # longpolling
+        - traefik.http.routers.pi-swarm-odoo-lp.rule=Host(`${ODOO_HOST}`) && PathPrefix(`/longpolling`)
+        - traefik.http.routers.pi-swarm-odoo-lp.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-odoo-lp.tls=true
+        - traefik.http.routers.pi-swarm-odoo-lp.tls.certresolver=le
+        - traefik.http.services.pi-swarm-odoo-lp.loadbalancer.server.port=8072
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8069/web/login"]
+      interval: 15s
+      timeout: 5s
+      retries: 20

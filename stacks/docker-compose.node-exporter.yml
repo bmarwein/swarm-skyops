@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  pi-swarm-node-exporter:
+    image: prom/node-exporter:v1.8.2
+    env_file: [ ../env/node-exporter.env ]
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    deploy:
+      mode: global
+      restart_policy: { condition: any }
+      update_config:
+        parallelism: 2
+        delay: 5s
+        order: start-first
+    network_mode: host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave

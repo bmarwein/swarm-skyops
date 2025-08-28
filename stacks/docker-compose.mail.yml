@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  pi-swarm-mail:
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    hostname: ${DMS_HOSTNAME}
+    env_file: [ ../env/mailserver.env ]
+    stop_grace_period: 1m
+    cap_add:
+      - NET_ADMIN
+      - SYS_PTRACE
+    networks: []   # pas besoin d’overlay pour IMAP/SMTP (exposés en host mode)
+    volumes:
+      # données & config
+      - ../volumes/mailserver/data:/var/mail
+      - ../volumes/mailserver/mail-state:/var/mail-state
+      - ../volumes/mailserver/maillogs:/var/log/mail
+      - ../volumes/mailserver/config:/tmp/docker-mailserver
+      # certificats TLS manuels
+      - ../volumes/mailserver/certs:/etc/dms/certs:ro
+      # accès au Docker socket (nécessaire pour certains scripts setup) -> RO
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      placement:
+        constraints:
+          - node.labels.mail.storage == true
+          - node.platform.os == linux
+      # un seul replica (nécessaire: ports host & stockage)
+      replicas: 1
+    # Publication des ports en "host mode"
+    ports:
+      - target: 25   published: 25   protocol: tcp   mode: host   # SMTP
+      - target: 465  published: 465  protocol: tcp   mode: host   # SMTPS
+      - target: 587  published: 587  protocol: tcp   mode: host   # Submission
+      - target: 143  published: 143  protocol: tcp   mode: host   # IMAP
+      - target: 993  published: 993  protocol: tcp   mode: host   # IMAPS
+      # Facultatifs (POP3/POP3S)
+      #- target: 110  published: 110  protocol: tcp   mode: host
+      #- target: 995  published: 995  protocol: tcp   mode: host
+      - target: 4190 published: 4190 protocol: tcp   mode: host   # Sieve

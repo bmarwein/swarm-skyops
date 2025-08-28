@@ -1,0 +1,67 @@
+version: "3.8"
+
+networks:
+  pi-swarm-traefik-net:
+    external: true
+
+services:
+  pi-swarm-skyops-site:
+    image: nginx:alpine
+    env_file: [ ../env/web.env ]
+    volumes:
+      - ../volumes/web/skyops/site:/usr/share/nginx/html:ro
+      - ../files/web/skyops.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [ pi-swarm-traefik-net ]
+    deploy:
+      placement:
+        constraints: [ node.labels.web.storage == true ]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-skyops.rule=Host(`${SKYOPS_HOST}`)
+        - traefik.http.routers.pi-swarm-skyops.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-skyops.tls=true
+        - traefik.http.routers.pi-swarm-skyops.tls.certresolver=le
+        - traefik.http.services.pi-swarm-skyops.loadbalancer.server.port=80
+
+  pi-swarm-admin-site:
+    image: nginx:alpine
+    env_file: [ ../env/web.env ]
+    volumes:
+      - ../volumes/web/skyops/admin/dist:/usr/share/nginx/html:ro
+      - ../files/web/admin.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [ pi-swarm-traefik-net ]
+    deploy:
+      placement:
+        constraints: [ node.labels.web.storage == true ]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-admin.rule=Host(`${ADMIN_HOST}`)
+        - traefik.http.routers.pi-swarm-admin.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-admin.tls=true
+        - traefik.http.routers.pi-swarm-admin.tls.certresolver=le
+        - traefik.http.services.pi-swarm-admin.loadbalancer.server.port=80
+
+  pi-swarm-api:
+    image: node:20-alpine
+    env_file: [ ../env/web.env ]
+    working_dir: /app
+    command: sh -c "node server.js"
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ}
+    volumes:
+      - ../volumes/web/skyops/api:/app
+      - ../volumes/web/skyops/api/logs:/var/log/app
+      - ../volumes/web/skyops/api/data:/data
+      - ../volumes/web/skyops/api/config:/config
+    networks: [ pi-swarm-traefik-net ]
+    deploy:
+      placement:
+        constraints: [ node.labels.web.storage == true ]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pi-swarm-api.rule=Host(`${API_HOST}`)
+        - traefik.http.routers.pi-swarm-api.entrypoints=websecure
+        - traefik.http.routers.pi-swarm-api.tls=true
+        - traefik.http.routers.pi-swarm-api.tls.certresolver=le
+        - traefik.http.services.pi-swarm-api.loadbalancer.server.port=3000
